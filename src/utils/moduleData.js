@@ -1,0 +1,182 @@
+export const trackingData = {
+  liveMap: {
+    zone: 'School',
+    status: 'Live',
+    location: 'Sector 11, Main Campus Road',
+    coordinates: '28.6129, 77.2295',
+    movement: 'Stationary',
+    speed: '0 km/h',
+    lastUpdate: '2 min ago',
+    primaryDevice: 'Online • 74%',
+    secondaryDevice: 'Standby',
+    secondaryReason: 'Primary healthy',
+    trailWindow: '15 min trail',
+  },
+  history: [
+    {
+      id: 'trk-h1',
+      range: '08:10 - 08:45',
+      zone: 'Transit',
+      movement: 'Transit',
+      address: 'North route highway',
+      duration: '35 min',
+    },
+    {
+      id: 'trk-h2',
+      range: '08:45 - 09:02',
+      zone: 'School',
+      movement: 'Walking',
+      address: 'Main campus gate to Block A',
+      duration: '17 min',
+    },
+    {
+      id: 'trk-h3',
+      range: '09:02 - 12:40',
+      zone: 'School',
+      movement: 'Stationary',
+      address: 'Class 6-A block',
+      duration: '3h 38m',
+    },
+  ],
+  geofences: [
+    {
+      id: 'geo-1',
+      name: 'Home',
+      radius: '400m',
+      hours: '6:00 AM - 10:00 PM',
+      alert: 'Enabled',
+      lastBreach: 'No recent breach',
+      status: 'Inside',
+    },
+    {
+      id: 'geo-2',
+      name: 'Coaching',
+      radius: '220m',
+      hours: '4:00 PM - 7:00 PM',
+      alert: 'Enabled',
+      lastBreach: 'Yesterday 7:24 PM',
+      status: 'Outside',
+    },
+  ],
+  movement: {
+    school: '6h 20m',
+    home: '4h 12m',
+    transit: '1h 04m',
+    outsideSafeZone: '22m',
+    suspicious: ['Repeated unknown zone near market (2 times)', 'Late-night movement on Thursday'],
+    attendanceCorrelation: 'Present today and inside school zone',
+  },
+}
+
+export const safetyData = {
+  alerts: [
+    {
+      id: 'safe-a1',
+      type: 'SOS Trigger',
+      severity: 'Critical',
+      time: '10:05 AM',
+      status: 'Resolved',
+      message: 'Emergency trigger received from primary device',
+    },
+    {
+      id: 'safe-a2',
+      type: 'Device Offline',
+      severity: 'Medium',
+      time: '09:12 AM',
+      status: 'Resolved',
+      message: 'Primary device heartbeat missed for 3 minutes',
+    },
+    {
+      id: 'safe-a3',
+      type: 'Attendance Mismatch',
+      severity: 'High',
+      time: 'Yesterday',
+      status: 'Active',
+      message: 'RFID present but manual class attendance absent',
+    },
+  ],
+  sosTimeline: [
+    'SOS triggered by wearable device',
+    'Parent notified and acknowledged',
+    'School safety desk notified',
+    'Secondary device auto-activation check completed',
+    'Incident marked resolved by school admin',
+  ],
+  mismatch: [
+    {
+      id: 'mm-1',
+      date: '03 Apr',
+      type: 'RFID Present — Not in Class',
+      severity: 'High',
+      status: 'Open',
+      details: 'Teacher manual not marked in first period',
+    },
+    {
+      id: 'mm-2',
+      date: '29 Mar',
+      type: 'Absent — Device inside School',
+      severity: 'High',
+      status: 'Reviewed',
+      details: 'Device detected near Block B between 9:10-9:35',
+    },
+  ],
+  deviceAlerts: [
+    'Primary device offline for 4 min (resolved)',
+    'Low battery warning 18% at 07:43 AM',
+    'Secondary device activated due to stale GPS (resolved)',
+  ],
+  geofenceAlerts: [
+    'Zone exit: Home at 7:52 AM',
+    'Restricted hour movement alert (last week)',
+    'Loitering near market beyond configured duration',
+  ],
+  behaviourAlerts: [
+    'Class discipline note shared by teacher',
+    'Repeated late entry advisory (2-week trend)',
+  ],
+  timeline: [
+    'SOS • Device • Attendance mismatch • Transport delay',
+    'Filter by date available',
+  ],
+}
+
+export const transportData = {
+  live: {
+    route: 'Blue Line - North',
+    tripType: 'Morning Pickup',
+    busStatus: 'On route',
+    eta: '9 min to child stop',
+    busId: 'BUS-3',
+    driver: 'R. Singh',
+    speed: '32 km/h',
+  },
+  childStatus: {
+    boarding: 'Boarded',
+    boardingTime: '07:58 AM',
+    drop: 'Dropped',
+    stop: 'Sector 11 Main Stop',
+    stopTime: '08:44 AM',
+    rfidSource: 'RFID confirmed',
+    manualSource: 'Attendant confirmed',
+    deviceCorrelation: 'Yes - near stop',
+  },
+  routeStops: [
+    'Stop 1: North Colony Gate - 07:32',
+    'Stop 2: Sector 8 Circle - 07:44',
+    'Stop 3: Sector 11 Main Stop - 07:58',
+    'Stop 4: School Main Gate - 08:22',
+  ],
+  alerts: [
+    'Bus delayed by 6 min (resolved)',
+    'Boarding mismatch detected (last week)',
+    'Route deviation advisory near market junction',
+  ],
+  history: [
+    'Trip start 07:20',
+    'Bus reached child stop 07:56',
+    'Boarding 07:58',
+    'School arrival 08:22',
+    'No critical alert for today',
+  ],
+}
+
