@@ -2,7 +2,7 @@ import React from 'react'
 import { TextInput, StyleSheet } from 'react-native'
 import { card, textPrimary, textSecondary, mutedBorder, radius } from '../../theme/colors'
 
-export default function Input({
+const Input = React.forwardRef(({
   value,
   onChangeText,
   placeholder,
@@ -11,9 +11,11 @@ export default function Input({
   autoCapitalize = 'none',
   style,
   returnKeyType = 'done',
-}) {
+  maxLength,
+}, ref) => {
   return (
     <TextInput
+      ref={ref}
       value={value}
       onChangeText={onChangeText}
       placeholder={placeholder}
@@ -22,10 +24,13 @@ export default function Input({
       keyboardType={keyboardType}
       autoCapitalize={autoCapitalize}
       returnKeyType={returnKeyType}
+      maxLength={maxLength}
       style={[styles.input, style]}
     />
   )
-}
+})
+
+export default Input;
 
 const styles = StyleSheet.create({
   input: {

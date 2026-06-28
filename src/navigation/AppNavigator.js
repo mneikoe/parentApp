@@ -1,49 +1,149 @@
-import React, { useEffect, useMemo, useState } from 'react'
+/**
+ * AppNavigator — STRAX Parent App Navigation Architecture v2
+ *
+ * Structure:
+ *   App
+ *   ├── BootScreen (loading session)
+ *   ├── AuthStack  → LoginScreen → OTPScreen
+ *   └── MainTabs (Bottom Tab Navigator)
+ *        ├── HomeStack    → DashboardScreen
+ *        ├── Academics    → AttendanceScreen, FeesScreen
+ *        ├── Transport    → TransportModuleScreen
+ *        ├── Payments     → FeesScreen
+ *        └── Profile      → ProfileScreen
+ *
+ * Session is provided via SessionContext — no prop drilling through navigator.
+ */
+
+import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
-import { ActivityIndicator, StyleSheet, View } from 'react-native'
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
+import { ActivityIndicator, StyleSheet, View, Animated } from 'react-native'
 import { enableScreens } from 'react-native-screens'
-import AsyncStorage from '@react-native-async-storage/async-storage'
+import { loadSession, clearSession } from '../utils/secureSession'
+import { SessionProvider } from '../context/SessionContext'
+import { background, textPrimary, primary } from '../theme/colors'
+import { auditEvent } from '../utils/audit'
 
-import LoginScreen from '../screens/auth/LoginScreen.js'
-import OTPScreen from '../screens/auth/OTPScreen.js'
-import UnifiedPanelScreen from '../screens/dashboard/UnifiedPanelScreen.js'
-import TrackingModuleScreen from '../screens/tracking/TrackingModuleScreen.js'
-import SafetyModuleScreen from '../screens/safety/SafetyModuleScreen.js'
-import TransportModuleScreen from '../screens/transport/TransportModuleScreen.js'
-import { background, textPrimary, primary } from '../theme/colors.js'
-import { auditEvent } from '../utils/audit.js'
+// ── Screens ──────────────────────────────────────────────────
+import LoginScreen            from '../screens/auth/LoginScreen'
+import OTPScreen              from '../screens/auth/OTPScreen'
+import DashboardScreen        from '../screens/dashboard/DashboardScreen'
+import AttendanceScreen       from '../screens/attendance/AttendanceScreen'
+import FeesScreen             from '../screens/fees/FeesScreen'
+import TransportModuleScreen  from '../screens/transport/TransportModuleScreen'
+import ProfileScreen          from '../screens/profile/ProfileScreen'
+
+// ── Custom Nav UI ─────────────────────────────────────────────
+import BottomTabBar from '../components/navigation/BottomTabBar'
 
 enableScreens()
 
 const AuthStack = createNativeStackNavigator()
-const MainStack = createNativeStackNavigator()
-const SESSION_KEY = 'parentApp.auth.session'
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const Tab       = createBottomTabNavigator()
+const HomeStack = createNativeStackNavigator()
 
-async function safePersistSession(session) {
-  try {
-    await AsyncStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({
-        session,
-        expiresAt: Date.now() + SESSION_TTL_MS,
-      })
-    )
-    return true
-  } catch {
-    return false
-  }
+// ── Home Stack ────────────────────────────────────────────────
+import LinkChildScreen from '../screens/profile/LinkChildScreen'
+
+function HomeNavigator() {
+  return (
+    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+      <HomeStack.Screen name="Dashboard" component={DashboardScreen} />
+      <HomeStack.Screen name="LinkChild" component={LinkChildScreen} />
+    </HomeStack.Navigator>
+  )
 }
 
-async function safeClearSession() {
-  try {
-    await AsyncStorage.removeItem(SESSION_KEY)
-  } catch {
-    // no-op: avoid crashing when native storage module is unavailable
-  }
+// ── Academics Stack ───────────────────────────────────────────
+import HomeworkDetailScreen   from '../screens/attendance/HomeworkDetailScreen'
+
+const AcademicsStack = createNativeStackNavigator()
+function AcademicsNavigator() {
+  return (
+    <AcademicsStack.Navigator screenOptions={{ headerShown: false }}>
+      <AcademicsStack.Screen name="Attendance" component={AttendanceScreen} />
+      <AcademicsStack.Screen name="HomeworkDetail" component={HomeworkDetailScreen} />
+    </AcademicsStack.Navigator>
+  )
 }
 
+// ── Transport Stack ───────────────────────────────────────────
+const TransportStack = createNativeStackNavigator()
+function TransportNavigator() {
+  return (
+    <TransportStack.Navigator screenOptions={{ headerShown: false }}>
+      <TransportStack.Screen name="TransportMain" component={TransportModuleScreen} />
+    </TransportStack.Navigator>
+  )
+}
+
+// ── Payments Stack ────────────────────────────────────────────
+const PaymentsStack = createNativeStackNavigator()
+function PaymentsNavigator() {
+  return (
+    <PaymentsStack.Navigator screenOptions={{ headerShown: false }}>
+      <PaymentsStack.Screen name="Fees" component={FeesScreen} />
+    </PaymentsStack.Navigator>
+  )
+}
+
+// ── Profile Stack ─────────────────────────────────────────────
+const ProfileStack = createNativeStackNavigator()
+function ProfileNavigator() {
+  return (
+    <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
+      <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} />
+    </ProfileStack.Navigator>
+  )
+}
+
+// ── Main Tabs ─────────────────────────────────────────────────
+function MainTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <BottomTabBar {...props} />}
+    >
+      <Tab.Screen name="Home"       component={HomeNavigator} />
+      <Tab.Screen name="Academics"  component={AcademicsNavigator} />
+      <Tab.Screen name="Transport"  component={TransportNavigator} />
+      <Tab.Screen name="Payments"   component={PaymentsNavigator} />
+      <Tab.Screen name="Profile"    component={ProfileNavigator} />
+    </Tab.Navigator>
+  )
+}
+
+// ── Auth Stack ────────────────────────────────────────────────
+import ProfileSetupScreen from '../screens/auth/ProfileSetupScreen'
+
+function AuthNavigator({ onVerified }) {
+  return (
+    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+      <AuthStack.Screen name="Login" component={LoginScreen} />
+      <AuthStack.Screen name="OTP">
+        {(props) => (
+          <OTPScreen
+            {...props}
+            onVerified={onVerified}
+          />
+        )}
+      </AuthStack.Screen>
+    </AuthStack.Navigator>
+  )
+}
+
+// ── Boot Splash ───────────────────────────────────────────────
+function BootScreen() {
+  return (
+    <View style={styles.boot}>
+      <ActivityIndicator size="large" color={primary} />
+    </View>
+  )
+}
+
+// ── Root Navigator ────────────────────────────────────────────
 export default function AppNavigator() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [session, setSession] = useState(null)
@@ -66,109 +166,72 @@ export default function AppNavigator() {
     let mounted = true
     ;(async () => {
       try {
-        const raw = await AsyncStorage.getItem(SESSION_KEY)
-        if (!raw) return
-        const parsed = JSON.parse(raw)
-        if (!parsed?.session || !parsed?.expiresAt) return
-        if (Date.now() > Number(parsed.expiresAt)) {
-          await AsyncStorage.removeItem(SESSION_KEY)
-          return
+        const loadedSession = await loadSession()
+        if (!loadedSession || !mounted) return
+
+        // Back-fill full_name from name for old sessions
+        const enriched = {
+          ...loadedSession,
+          full_name: loadedSession.full_name || loadedSession.name || null,
+          name:      loadedSession.name      || loadedSession.full_name || null,
         }
-        if (!mounted) return
-        setSession(parsed.session)
+        setSession(enriched)
         setIsAuthenticated(true)
       } catch {
-        await safeClearSession()
+        await clearSession().catch(() => {})
       } finally {
         if (mounted) setBootstrapping(false)
       }
     })()
+    return () => { mounted = false }
+  }, [])
 
-    return () => {
-      mounted = false
-    }
+  const handleVerified = useCallback((verifiedSession) => {
+    setSession(verifiedSession)
+    setIsAuthenticated(true)
+    auditEvent('AUTH_SUCCESS', { phone: verifiedSession?.phone })
+  }, [])
+
+  const handleLogout = useCallback(() => {
+    setIsAuthenticated(false)
+    setSession(null)
   }, [])
 
   if (bootstrapping) {
-    return (
-      <View style={styles.boot}>
-        <ActivityIndicator size="large" color={primary} />
-      </View>
-    )
+    return <BootScreen />
   }
+
+  // If authenticated but profile name is not set yet, route to setup
+  const showSetup = isAuthenticated && !session?.name && !session?.full_name
 
   return (
     <NavigationContainer theme={navigationTheme}>
-      {isAuthenticated ? (
-        <MainStack.Navigator screenOptions={{ headerShown: false }}>
-          <MainStack.Screen name="UnifiedPanel">
-            {(props) => (
-              <UnifiedPanelScreen
-                {...props}
-                session={session}
-                onSessionUpdate={async (nextSession) => {
-                  setSession(nextSession)
-                  await safePersistSession(nextSession)
-                }}
-                onOpenModule={(module) => {
-                  if (module === 'tracking') {
-                    props.navigation.navigate('TrackingModule', { session })
-                    return
-                  }
-                  if (module === 'safety') {
-                    props.navigation.navigate('SafetyModule', { session })
-                    return
-                  }
-                  if (module === 'transport') {
-                    props.navigation.navigate('TransportModule', { session })
-                  }
-                }}
-                onLogout={() => {
-                  setIsAuthenticated(false)
-                  setSession(null)
-                  safeClearSession().catch(() => {})
-                }}
-              />
-            )}
-          </MainStack.Screen>
-          <MainStack.Screen name="TrackingModule">
-            {(props) => <TrackingModuleScreen {...props} />}
-          </MainStack.Screen>
-          <MainStack.Screen name="SafetyModule">
-            {(props) => <SafetyModuleScreen {...props} />}
-          </MainStack.Screen>
-          <MainStack.Screen name="TransportModule">
-            {(props) => <TransportModuleScreen {...props} />}
-          </MainStack.Screen>
-        </MainStack.Navigator>
-      ) : (
-        <AuthStack.Navigator screenOptions={{ headerShown: false }}>
-          <AuthStack.Screen name="Login" component={LoginScreen} />
-          <AuthStack.Screen name="OTP">
-            {(props) => (
-              <OTPScreen
-                {...props}
-                onVerified={(verifiedSession) => {
-                  setSession(verifiedSession)
-                  setIsAuthenticated(true)
-                  safePersistSession(verifiedSession).catch(() => {})
-                  auditEvent('HEADER_RENDERED', { mode: verifiedSession?.mode || 'linked' })
-                }}
-              />
-            )}
-          </AuthStack.Screen>
-        </AuthStack.Navigator>
-      )}
+      <SessionProvider
+        session={session}
+        setSession={setSession}
+        onLogout={handleLogout}
+      >
+        {isAuthenticated ? (
+          showSetup ? (
+            <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+              <AuthStack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
+            </AuthStack.Navigator>
+          ) : (
+            <MainTabs />
+          )
+        ) : (
+          <AuthNavigator onVerified={handleVerified} />
+        )}
+      </SessionProvider>
     </NavigationContainer>
   )
 }
 
 const styles = StyleSheet.create({
   boot: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    flex:            1,
+    alignItems:      'center',
+    justifyContent:  'center',
     backgroundColor: background,
   },
 })
-

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import {
   Modal,
   Pressable,
@@ -7,6 +7,7 @@ import {
   Text,
   useWindowDimensions,
   View,
+  ActivityIndicator,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
@@ -15,75 +16,21 @@ import {
   card,
   danger,
   primary,
+  primaryLight,
   radius,
   success,
   textMuted,
   textPrimary,
   textSecondary,
   warning,
+  secondary,
+  spacing,
+  surface,
 } from '../../theme/colors'
 import { StackSafeScrollView } from '../../components/common/SafeScrollView'
 import Button from '../../components/common/Button'
 import { auditEvent } from '../../utils/audit'
-
-const DASHBOARD_CARDS = [
-  {
-    key: 'device',
-    title: 'Safety & Device Status',
-    summary: 'Primary: Online • Battery 74% • Last update: 2 min ago',
-    status: 'healthy',
-    module: 'S-TRAX Devices',
-  },
-  {
-    key: 'tracking',
-    title: 'Live Tracking Mini Map',
-    summary: 'Zone: School • Movement: Stationary • Status: Live',
-    status: 'healthy',
-    module: 'Live Tracking',
-  },
-  {
-    key: 'attendance',
-    title: 'Attendance (RFID + Manual)',
-    summary: 'Today: Present • Check-in: 8:17 AM • Mismatch: None',
-    status: 'healthy',
-    module: 'Attendance',
-  },
-  {
-    key: 'transport',
-    title: 'Transport / Bus',
-    summary: 'Route Blue-3 • ETA 9 min • Boarding: Boarded',
-    status: 'attention',
-    module: 'Transport / Bus Tracking',
-  },
-  {
-    key: 'academics',
-    title: 'Academics Snapshot',
-    summary: 'Latest score 87% • Trend improving • PTM Friday',
-    status: 'healthy',
-    module: 'Academics',
-  },
-  {
-    key: 'homework',
-    title: 'Homework Snapshot',
-    summary: 'Pending: 2 • Overdue: 1 • Last feedback updated',
-    status: 'attention',
-    module: 'Homework & Classroom',
-  },
-  {
-    key: 'fees',
-    title: 'Finance / Fees',
-    summary: 'Outstanding: INR 3,200 • Next due: 10 Apr',
-    status: 'attention',
-    module: 'Fees & Payments',
-  },
-]
-
-const ALERTS_FEED = [
-  'SOS: No active emergency',
-  'Device offline alert resolved 1h ago',
-  'Homework overdue: Mathematics Worksheet',
-  'Fee reminder: April installment due in 7 days',
-]
+import { parentGet } from '../../utils/api'
 
 const QUICK_ACTIONS = [
   'Live Tracking',
@@ -120,64 +67,20 @@ const MENU_GROUPS = [
     items: ['Documents / Certificates', 'Report Cards', 'School Files'],
   },
   {
-    title: 'Engagement',
-    items: ['Learning & Gaming', 'Hostel / PG Finder'],
-  },
-  {
     title: 'Support',
     items: ['Help & Support', 'FAQ', 'Documentation', 'Ticket', 'Live Chat'],
   },
   {
     title: 'Account',
-    items: ['Settings', 'Add / Link Child', 'Search School (Global)', 'Logout'],
+    items: ['Settings', 'Add / Link Child', 'Logout'],
   },
 ]
 
 function getSafetyTone(status) {
-  if (status === 'Alert') return styles.pillAlert
-  if (status === 'Attention') return styles.pillAttention
+  if (status === 'ABSENT' || status === 'Alert') return styles.pillAlert
+  if (status === 'LATE' || status === 'Attention') return styles.pillAttention
   return styles.pillSafe
 }
-
-function getCardStatusStyle(status) {
-  if (status === 'critical') return styles.statusCritical
-  if (status === 'attention') return styles.statusAttention
-  return styles.statusHealthy
-}
-
-function isLockedItem({ mode, item, activeChild }) {
-  const alwaysAllowedInLimited = [
-    'Help & Support',
-    'FAQ',
-    'Documentation',
-    'Ticket',
-    'Live Chat',
-    'Hostel / PG Finder',
-    'Search School (Global)',
-  ]
-  if (mode === 'pending') return !alwaysAllowedInLimited.includes(item)
-  if (activeChild?.subscription === 'Expired') {
-    const gated = [
-      'Live Tracking',
-      'Tracking History',
-      'Geofence & Safe Zones',
-      'Transport / Bus Tracking',
-      'Safety & Alerts',
-    ]
-    return gated.includes(item)
-  }
-  return false
-}
-
-const TRACKING_MODULES = new Set([
-  'Live Tracking',
-  'Tracking History',
-  'Geofence & Safe Zones',
-  'S-TRAX Devices',
-])
-
-const SAFETY_MODULES = new Set(['Safety & Alerts', 'SOS Timeline'])
-const TRANSPORT_MODULES = new Set(['Transport / Bus Tracking'])
 
 export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout, onOpenModule }) {
   const insets = useSafeAreaInsets()
@@ -185,46 +88,103 @@ export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout,
   const [moreOpen, setMoreOpen] = useState(false)
   const [childSelectorOpen, setChildSelectorOpen] = useState(false)
   const [activeModule, setActiveModule] = useState('Dashboard')
+  
+  // Real dynamic states
+  const [children, setChildren] = useState([])
+  const [activeChildId, setActiveChildId] = useState(null)
+  const [summary, setSummary] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [requests, setRequests] = useState([])
+  const [mode, setMode] = useState('unlinked') // 'linked' | 'pending' | 'unlinked'
+
   const compactHeader = width < 390
 
-  const activeChild = useMemo(() => {
-    if (!session?.activeChildId) return null
-    return session.linkedChildren.find((child) => child.id === session.activeChildId) || null
-  }, [session])
+  // 1. Fetch linked children on load
+  const loadData = async () => {
+    setLoading(true)
+    try {
+      // Get children
+      const data = await parentGet('/children')
+      const kids = data.children || []
+      setChildren(kids)
 
-  const linkedMode = session.mode === 'linked'
-  const pendingMode = session.mode === 'pending'
-  const unlinkedMode = session.mode === 'unlinked'
-
-  const openModule = (moduleName) => {
-    const locked = isLockedItem({ mode: session.mode, item: moduleName, activeChild })
-    if (locked) {
-      auditEvent('LOCKED_FEATURE_TAPPED', { module: moduleName, mode: session.mode })
-      return
-    }
-    setActiveModule(moduleName)
-    auditEvent('MENU_ITEM_OPENED', { module: moduleName })
-    setMoreOpen(false)
-    if (TRACKING_MODULES.has(moduleName)) {
-      onOpenModule?.('tracking')
-      return
-    }
-    if (SAFETY_MODULES.has(moduleName)) {
-      onOpenModule?.('safety')
-      return
-    }
-    if (TRANSPORT_MODULES.has(moduleName)) {
-      onOpenModule?.('transport')
+      if (kids.length > 0) {
+        setMode('linked')
+        // Default to first child if not set
+        const defaultChildId = activeChildId || kids[0].student_id
+        setActiveChildId(defaultChildId)
+        await loadDashboardSummary(defaultChildId, kids)
+      } else {
+        // Check manual requests to classify mode
+        const reqData = await parentGet('/links/requests')
+        const linkRequests = reqData.requests || []
+        setRequests(linkRequests)
+        if (linkRequests.length > 0) {
+          setMode('pending')
+        } else {
+          setMode('unlinked')
+        }
+      }
+    } catch (err) {
+      console.warn('[UnifiedPanel] loadData error:', err.message)
+    } finally {
+      setLoading(false)
     }
   }
 
-  const switchChild = (childId) => {
-    onSessionUpdate({
-      ...session,
-      activeChildId: childId,
-    })
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  // Auto polling if in pending mode (approvals check)
+  useEffect(() => {
+    if (mode !== 'pending') return
+    const interval = setInterval(() => {
+      loadData()
+    }, 15000)
+    return () => clearInterval(interval)
+  }, [mode])
+
+  // 2. Fetch dashboard summary for active child
+  const loadDashboardSummary = async (childId, currentKids = children) => {
+    const child = currentKids.find((c) => c.student_id === childId)
+    if (!child) return
+    try {
+      const sumRes = await parentGet(`/dashboard/summary?student_id=${child.student_id}&group_id=${child.group_id}`)
+      setSummary(sumRes.summary)
+    } catch (err) {
+      console.warn('[UnifiedPanel] summary fetch warning:', err.message)
+    }
+  }
+
+  const activeChild = useMemo(() => {
+    if (!activeChildId) return null
+    return children.find((c) => c.student_id === activeChildId) || null
+  }, [activeChildId, children])
+
+  const switchChild = async (childId) => {
+    setActiveChildId(childId)
     setChildSelectorOpen(false)
     auditEvent('CHILD_CHANGED', { childId })
+    await loadDashboardSummary(childId)
+  }
+
+  const openModule = (moduleName) => {
+    setActiveModule(moduleName)
+    auditEvent('MENU_ITEM_OPENED', { module: moduleName })
+    setMoreOpen(false)
+
+    const trackingModules = new Set(['Live Tracking', 'Tracking History', 'Geofence & Safe Zones', 'S-TRAX Devices'])
+    const safetyModules = new Set(['Safety & Alerts', 'SOS Timeline'])
+    const transportModules = new Set(['Transport / Bus Tracking'])
+
+    if (trackingModules.has(moduleName)) {
+      onOpenModule?.('tracking')
+    } else if (safetyModules.has(moduleName)) {
+      onOpenModule?.('safety')
+    } else if (transportModules.has(moduleName)) {
+      onOpenModule?.('transport')
+    }
   }
 
   const renderLimitedMode = () => (
@@ -232,17 +192,26 @@ export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout,
       <View style={[styles.panelCard, styles.awaitingBanner]}>
         <Text style={styles.awaitingTitle}>Awaiting School Approval</Text>
         <Text style={styles.awaitingText}>
-          Request status and support modules are available. Tracking, attendance, academics,
-          payments and communication stay locked until approval.
+          Your link request is currently PENDING school verification.
+          ERP dashboards and tracking will unlock as soon as your school approves the connection.
         </Text>
       </View>
 
       <View style={styles.panelCard}>
-        <Text style={styles.sectionTitle}>Available in Limited Mode</Text>
-        {['Request Status', 'Help & Support', 'Hostel / PG Finder', 'School Search'].map((item) => (
-          <Pressable key={item} onPress={() => openModule(item)} style={styles.availableItem}>
-            <Text style={styles.availableItemText}>{item}</Text>
-          </Pressable>
+        <Text style={styles.sectionTitle}>Manual Link Requests</Text>
+        {requests.map((req) => (
+          <View key={req.id} style={styles.availableItem}>
+            <View style={styles.reqHeader}>
+              <Text style={styles.availableItemText}>{req.student_name}</Text>
+              <Text style={[
+                styles.statusBadgeText,
+                req.status === 'APPROVED' ? styles.successColor : styles.warningColor
+              ]}>
+                {req.status}
+              </Text>
+            </View>
+            <Text style={styles.reqMeta}>Adm: {req.admission_number} • {req.school_name}</Text>
+          </View>
         ))}
       </View>
     </View>
@@ -251,27 +220,35 @@ export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout,
   const renderUnlinkedMode = () => (
     <View style={styles.sectionBlock}>
       <View style={[styles.panelCard, styles.awaitingBanner]}>
-        <Text style={styles.awaitingTitle}>No linked school found</Text>
+        <Text style={styles.awaitingTitle}>No Linked Children</Text>
         <Text style={styles.awaitingText}>
-          Search school globally or register child to send access request.
+          Your parent account is ready, but not linked to any school profiles yet.
+          Submit an admission number to link.
         </Text>
       </View>
       <View style={styles.actionRow}>
-        <Button variant="primary" onPress={() => openModule('Search School (Global)')} style={styles.flexButton}>
-          Search School
-        </Button>
-        <Button variant="outline" onPress={() => openModule('Add / Link Child')} style={styles.flexButton}>
-          Register Child
+        <Button variant="primary" onPress={() => openModule('Add / Link Child')} style={styles.flexButton}>
+          Link Child Profile
         </Button>
       </View>
     </View>
   )
 
+  if (loading) {
+    return (
+      <View style={styles.boot}>
+        <ActivityIndicator size="large" color={primary} />
+        <Text style={styles.loadingText}>Loading Child Profile...</Text>
+      </View>
+    )
+  }
+
   return (
     <View style={styles.screen}>
+      {/* ── Sticky Header ── */}
       <View style={[styles.stickyHeader, { paddingTop: Math.max(insets.top, 10) }]}>
         <View style={[styles.headerTop, compactHeader && styles.headerTopCompact]}>
-          {linkedMode ? (
+          {mode === 'linked' && activeChild ? (
             <Pressable
               onPress={() => {
                 setChildSelectorOpen(true)
@@ -280,14 +257,14 @@ export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout,
               style={styles.childIdentity}
             >
               <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{activeChild?.name?.slice(0, 1) || 'C'}</Text>
+                <Text style={styles.avatarText}>{activeChild.first_name?.slice(0, 1) || 'C'}</Text>
               </View>
               <View style={styles.identityTextWrap}>
                 <Text style={styles.identityName} numberOfLines={1}>
-                  {activeChild?.name}
+                  {activeChild.full_name}
                 </Text>
                 <Text style={styles.identitySub} numberOfLines={1}>
-                  {activeChild?.classLabel} • {activeChild?.branch}
+                  {activeChild.class_name} - {activeChild.section_name} • {activeChild.school_name}
                 </Text>
               </View>
             </Pressable>
@@ -298,30 +275,31 @@ export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout,
               </View>
               <View style={styles.identityTextWrap}>
                 <Text style={styles.identityName} numberOfLines={1}>
-                  {session.parentName}
+                  Parent Account
                 </Text>
                 <Text style={styles.identitySub} numberOfLines={1}>
-                  {session.mobile}
+                  {session.user?.phone || 'Online'}
                 </Text>
               </View>
             </View>
           )}
 
           <View style={[styles.headerPills, compactHeader && styles.headerPillsCompact]}>
-            <Pressable
-              onPress={() => auditEvent('SAFETY_PILL_OPENED')}
-              style={[styles.statusPill, getSafetyTone(activeChild?.safety || 'Attention')]}
-            >
-              <Text style={styles.statusPillText}>{pendingMode ? 'Awaiting Approval' : activeChild?.safety || 'Attention'}</Text>
-            </Pressable>
-            {linkedMode ? (
+            {mode === 'linked' && summary ? (
               <Pressable
-                onPress={() => auditEvent('SUBSCRIPTION_BADGE_OPENED')}
-                style={styles.subscriptionPill}
+                onPress={() => auditEvent('SAFETY_PILL_OPENED')}
+                style={[styles.statusPill, getSafetyTone(summary.today_attendance)]}
               >
-                <Text style={styles.subscriptionText}>{activeChild?.subscription || 'Active'}</Text>
+                <Text style={styles.statusPillText}>
+                  {summary.today_attendance || 'NO ATTENDANCE'}
+                </Text>
               </Pressable>
+            ) : mode === 'pending' ? (
+              <View style={[styles.statusPill, styles.pillAttention]}>
+                <Text style={styles.statusPillText}>Awaiting Approval</Text>
+              </View>
             ) : null}
+
             <Pressable
               onPress={() => {
                 setActiveModule('Notification Center')
@@ -346,49 +324,62 @@ export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout,
 
       <StackSafeScrollView>
         <View style={styles.screenTitleWrap}>
-          <Text style={styles.screenTitle}>Parent + Student Unified Panel</Text>
+          <Text style={styles.screenTitle}>Parent Unified Panel</Text>
           <Text style={styles.screenSubtitle}>
-            S-TRAX safety + tracking + ERP snapshot with multi-child context.
+            S-TRAX ERP snapshot & safety monitoring.
           </Text>
         </View>
 
-        {pendingMode ? renderLimitedMode() : null}
-        {unlinkedMode ? renderUnlinkedMode() : null}
+        {mode === 'pending' ? renderLimitedMode() : null}
+        {mode === 'unlinked' ? renderUnlinkedMode() : null}
 
-        {linkedMode ? (
+        {mode === 'linked' && activeChild && summary ? (
           <View style={styles.sectionBlock}>
-            {DASHBOARD_CARDS.map((cardItem) => (
-              <Pressable
-                key={cardItem.key}
-                onPress={() => {
-                  openModule(cardItem.module)
-                  auditEvent('CARD_OPENED', { card: cardItem.key })
-                }}
-                style={[styles.panelCard, styles.cardPress]}
-              >
-                <Text style={styles.cardTitle}>{cardItem.title}</Text>
-                <Text style={styles.cardSummary}>{cardItem.summary}</Text>
-                <View style={styles.cardFooterRow}>
-                  <View style={[styles.statusDot, getCardStatusStyle(cardItem.status)]} />
-                  <Text style={styles.cardFooterText}>Tap to open {cardItem.module}</Text>
-                </View>
-              </Pressable>
-            ))}
+            {/* Dynamic Dashboard Cards */}
+            <Pressable
+              onPress={() => openModule('Attendance')}
+              style={[styles.panelCard, styles.cardPress]}
+            >
+              <Text style={styles.cardTitle}>RFID & Attendance</Text>
+              <Text style={styles.cardSummary}>
+                Today's Status: {summary.today_attendance ? `MARK ${summary.today_attendance}` : 'No punch records today'}
+              </Text>
+              <View style={styles.cardFooterRow}>
+                <View style={[styles.statusDot, summary.today_attendance === 'PRESENT' ? styles.statusHealthy : styles.statusAttention]} />
+                <Text style={styles.cardFooterText}>Tap to view history</Text>
+              </View>
+            </Pressable>
 
-            <View style={styles.panelCard}>
-              <Text style={styles.sectionTitle}>Alerts & Notifications Feed</Text>
-              {ALERTS_FEED.map((item) => (
-                <Pressable
-                  key={item}
-                  onPress={() => auditEvent('ALERT_CLICKED', { item })}
-                  style={styles.feedRow}
-                >
-                  <View style={styles.feedDot} />
-                  <Text style={styles.feedText}>{item}</Text>
-                </Pressable>
-              ))}
-            </View>
+            <Pressable
+              onPress={() => openModule('Homework & Classroom')}
+              style={[styles.panelCard, styles.cardPress]}
+            >
+              <Text style={styles.cardTitle}>Homework & Classroom</Text>
+              <Text style={styles.cardSummary}>
+                Active assignments: {summary.homework_count} pending
+              </Text>
+              <View style={styles.cardFooterRow}>
+                <View style={[styles.statusDot, summary.homework_count > 0 ? styles.statusAttention : styles.statusHealthy]} />
+                <Text style={styles.cardFooterText}>Tap to view classroom</Text>
+              </View>
+            </Pressable>
 
+            <Pressable
+              onPress={() => openModule('Fees & Payments')}
+              style={[styles.panelCard, styles.cardPress]}
+            >
+              <Text style={styles.cardTitle}>Outstanding Fees</Text>
+              <Text style={styles.cardSummary}>
+                Dues: {summary.fee_due > 0 ? `INR ${summary.fee_due}` : 'Fully Paid'}
+                {summary.fee_due_date ? ` • Due: ${summary.fee_due_date.split('T')[0]}` : ''}
+              </Text>
+              <View style={styles.cardFooterRow}>
+                <View style={[styles.statusDot, summary.fee_due > 0 ? styles.statusCritical : styles.statusHealthy]} />
+                <Text style={styles.cardFooterText}>Pay Outstanding Fees</Text>
+              </View>
+            </Pressable>
+
+            {/* Quick Actions */}
             <View style={styles.panelCard}>
               <Text style={styles.sectionTitle}>Quick Actions</Text>
               <View style={styles.quickActionsGrid}>
@@ -413,78 +404,69 @@ export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout,
           <View style={[styles.panelCard, styles.modulePreview]}>
             <Text style={styles.sectionTitle}>{activeModule}</Text>
             <Text style={styles.cardSummary}>
-              Module scaffold open. Child context, permission checks, subscription gates and audit
-              hooks are wired from unified panel shell.
+              Module preview scaffold. Real operational data is wired dynamically from the school server shard.
             </Text>
           </View>
         ) : null}
       </StackSafeScrollView>
 
+      {/* Child Selector Modal */}
       <Modal visible={childSelectorOpen} animationType="slide" transparent onRequestClose={() => setChildSelectorOpen(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setChildSelectorOpen(false)}>
           <Pressable style={styles.bottomSheet} onPress={() => {}}>
-            <Text style={styles.bottomSheetTitle}>Select Child</Text>
+            <Text style={styles.bottomSheetTitle}>Select Child Profile</Text>
             <ScrollView style={styles.bottomSheetList}>
-              {(session.linkedChildren || []).map((child) => (
+              {children.map((child) => (
                 <Pressable
-                  key={child.id}
-                  onPress={() => switchChild(child.id)}
+                  key={child.student_id}
+                  onPress={() => switchChild(child.student_id)}
                   style={[
                     styles.childRow,
-                    session.activeChildId === child.id && styles.childRowActive,
+                    activeChildId === child.student_id && styles.childRowActive,
                   ]}
                 >
-                  <Text style={styles.childRowName}>{child.name}</Text>
+                  <Text style={styles.childRowName}>{child.full_name}</Text>
                   <Text style={styles.childRowMeta}>
-                    {child.classLabel} • {child.branch} • {child.trackingLastUpdate}
+                    {child.class_name} - {child.section_name} • {child.school_name}
                   </Text>
                 </Pressable>
               ))}
             </ScrollView>
             <View style={styles.childActions}>
-              <Button variant="outline" style={styles.flexButton} onPress={() => openModule('Add / Link Child')}>
-                Add Child
-              </Button>
-              <Button variant="outline" style={styles.flexButton} onPress={() => openModule('Search School (Global)')}>
-                Search School
+              <Button variant="outline" style={styles.flexButton} onPress={() => { setChildSelectorOpen(false); openModule('Add / Link Child') }}>
+                Link Another Child
               </Button>
             </View>
           </Pressable>
         </Pressable>
       </Modal>
 
+      {/* More Options Modal */}
       <Modal visible={moreOpen} animationType="fade" transparent onRequestClose={() => setMoreOpen(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setMoreOpen(false)}>
           <Pressable style={styles.morePanel} onPress={() => {}}>
-            <Text style={styles.bottomSheetTitle}>More</Text>
+            <Text style={styles.bottomSheetTitle}>Menu Options</Text>
             <ScrollView showsVerticalScrollIndicator={false}>
               {MENU_GROUPS.map((group) => (
                 <View key={group.title} style={styles.menuGroup}>
                   <Text style={styles.menuGroupTitle}>{group.title}</Text>
-                  {group.items.map((item) => {
-                    const locked = isLockedItem({ mode: session.mode, item, activeChild })
-                    return (
-                      <Pressable
-                        key={item}
-                        onPress={() => {
-                          if (item === 'Logout') {
-                            auditEvent('LOGOUT')
-                            onLogout?.()
-                            return
-                          }
-                          openModule(item)
-                        }}
-                        style={[styles.menuItem, locked && styles.menuItemLocked]}
-                      >
-                        <Text style={[styles.menuItemText, locked && styles.menuItemTextLocked]}>
-                          {item}
-                        </Text>
-                        <Text style={styles.menuArrow}>
-                          {locked ? 'Locked' : '>'}
-                        </Text>
-                      </Pressable>
-                    )
-                  })}
+                  {group.items.map((item) => (
+                    <Pressable
+                      key={item}
+                      onPress={() => {
+                        if (item === 'Logout') {
+                          auditEvent('LOGOUT')
+                          onLogout?.()
+                          return
+                        }
+                        openModule(item)
+                      }}
+                      style={styles.menuItem}
+                    >
+                      <Text style={styles.menuItemText}>{item}</Text>
+                      <Text style={styles.menuArrow}>&gt;</Text>
+                    </Pressable>
+                  ))}
                 </View>
               ))}
             </ScrollView>
@@ -496,6 +478,18 @@ export default function UnifiedPanelScreen({ session, onSessionUpdate, onLogout,
 }
 
 const styles = StyleSheet.create({
+  boot: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: background,
+    gap: spacing.md,
+  },
+  loadingText: {
+    color: textPrimary,
+    fontWeight: '700',
+    fontSize: 14,
+  },
   screen: {
     flex: 1,
     backgroundColor: background,
@@ -503,7 +497,7 @@ const styles = StyleSheet.create({
   stickyHeader: {
     borderBottomWidth: 1,
     borderBottomColor: border,
-    backgroundColor: 'rgba(23,40,69,0.98)',
+    backgroundColor: card,
     paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: 10,
@@ -530,13 +524,13 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 19,
     borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.5)',
-    backgroundColor: 'rgba(96,165,250,0.16)',
+    borderColor: border,
+    backgroundColor: surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    color: textPrimary,
+    color: primary,
     fontWeight: '900',
     fontSize: 15,
   },
@@ -576,30 +570,19 @@ const styles = StyleSheet.create({
     color: textPrimary,
   },
   pillSafe: {
-    backgroundColor: 'rgba(16,185,129,0.22)',
+    backgroundColor: 'rgba(0,200,83,0.18)',
   },
   pillAttention: {
-    backgroundColor: 'rgba(245,158,11,0.24)',
+    backgroundColor: 'rgba(255,193,7,0.18)',
   },
   pillAlert: {
-    backgroundColor: 'rgba(239,68,68,0.24)',
-  },
-  subscriptionPill: {
-    backgroundColor: 'rgba(96,165,250,0.2)',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  subscriptionText: {
-    color: textPrimary,
-    fontWeight: '900',
-    fontSize: 11,
+    backgroundColor: 'rgba(255,82,82,0.18)',
   },
   iconPill: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: surface,
     borderWidth: 1,
     borderColor: border,
     alignItems: 'center',
@@ -611,29 +594,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   screenTitleWrap: {
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: 16,
+    marginBottom: 8,
+    paddingHorizontal: 14,
   },
   screenTitle: {
     color: textPrimary,
     fontWeight: '900',
-    fontSize: 18,
+    fontSize: 22,
   },
   screenSubtitle: {
     color: textMuted,
     marginTop: 4,
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 13,
   },
   sectionBlock: {
     gap: 10,
+    paddingHorizontal: 14,
   },
   panelCard: {
     backgroundColor: card,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: border,
-    padding: 12,
+    padding: 14,
   },
   cardPress: {
     gap: 8,
@@ -689,7 +674,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 9,
     marginBottom: 8,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: surface,
   },
   feedDot: {
     width: 8,
@@ -714,7 +699,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: border,
     borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: surface,
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
@@ -724,8 +709,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   awaitingBanner: {
-    backgroundColor: 'rgba(245,158,11,0.15)',
-    borderColor: 'rgba(245,158,11,0.38)',
+    backgroundColor: 'rgba(255,193,7,0.12)',
+    borderColor: 'rgba(255,193,7,0.3)',
   },
   awaitingTitle: {
     color: textPrimary,
@@ -742,11 +727,28 @@ const styles = StyleSheet.create({
   availableItem: {
     borderWidth: 1,
     borderColor: border,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: surface,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 9,
     marginBottom: 8,
+  },
+  reqHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  successColor: { color: success },
+  warningColor: { color: warning },
+  reqMeta: {
+    color: textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 4,
   },
   availableItemText: {
     color: textPrimary,
@@ -756,13 +758,15 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     gap: 8,
+    paddingHorizontal: 14,
   },
   flexButton: {
     flex: 1,
   },
   modulePreview: {
-    marginTop: 4,
-    marginBottom: 2,
+    marginTop: 8,
+    marginBottom: 8,
+    marginHorizontal: 14,
   },
   modalBackdrop: {
     flex: 1,
@@ -771,7 +775,7 @@ const styles = StyleSheet.create({
   },
   bottomSheet: {
     maxHeight: '66%',
-    backgroundColor: 'rgba(23,40,69,0.98)',
+    backgroundColor: card,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderWidth: 1,
@@ -793,11 +797,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 10,
     marginBottom: 8,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: surface,
   },
   childRowActive: {
-    borderColor: 'rgba(250,204,21,0.62)',
-    backgroundColor: 'rgba(250,204,21,0.15)',
+    borderColor: primary,
+    backgroundColor: primaryLight,
   },
   childRowName: {
     color: textPrimary,
@@ -819,7 +823,7 @@ const styles = StyleSheet.create({
     marginTop: 70,
     marginHorizontal: 10,
     marginBottom: 20,
-    backgroundColor: 'rgba(23,40,69,0.98)',
+    backgroundColor: card,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: border,
@@ -839,7 +843,7 @@ const styles = StyleSheet.create({
   menuItem: {
     borderWidth: 1,
     borderColor: border,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: surface,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 9,
@@ -848,17 +852,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  menuItemLocked: {
-    borderColor: 'rgba(245,158,11,0.45)',
-    backgroundColor: 'rgba(245,158,11,0.12)',
-  },
   menuItemText: {
     color: textPrimary,
     fontSize: 12,
     fontWeight: '800',
-  },
-  menuItemTextLocked: {
-    color: '#FCD34D',
   },
   menuArrow: {
     color: textMuted,
@@ -866,4 +863,3 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 })
-

@@ -1,5 +1,5 @@
 import React from 'react'
-import { ScrollView, StyleSheet, View } from 'react-native'
+import { ScrollView, StyleSheet, View, StatusBar, Platform } from 'react-native'
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs'
 import { background } from '../../theme/colors'
 import useResponsiveLayout from '../../hooks/useResponsiveLayout'
@@ -14,6 +14,10 @@ function BaseSafeScrollView({
   ...rest
 }) {
   const layout = useResponsiveLayout({ tabBarHeight })
+  
+  // Calculate safe status bar top height fallback
+  const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 20
+  const safeTopPadding = Math.max(layout.insets.top, statusBarHeight) + 12
 
   return (
     <View style={[styles.root, { backgroundColor: background }, style]}>
@@ -24,7 +28,7 @@ function BaseSafeScrollView({
         contentContainerStyle={[
           {
             paddingHorizontal: layout.horizontalPadding,
-            paddingTop: Math.max(layout.insets.top, 8),
+            paddingTop: safeTopPadding,
             paddingBottom: layout.scrollBottomPadding,
             flexGrow: 1,
             gap: layout.gap,

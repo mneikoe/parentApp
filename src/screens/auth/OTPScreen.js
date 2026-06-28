@@ -1,257 +1,384 @@
-import React, { useMemo, useRef, useState } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native'
-import { background, border, card, primary, radius, textMuted, textPrimary, textSecondary } from '../../theme/colors.js'
-import { StackSafeScrollView } from '../../components/common/SafeScrollView.js'
-import Button from '../../components/common/Button.js'
-import useOtpCountdown from '../../hooks/useOtpCountdown.js'
-import useResponsiveLayout from '../../hooks/useResponsiveLayout.js'
-import { auditEvent } from '../../utils/audit.js'
-import { resolveParentSession } from '../../utils/parentSession.js'
+/**
+ * OTPScreen v2 — Premium STRAX OTP Verification Screen
+ * Uses OTPBoxes component. Animated success state.
+ * Auto-submits at 6 digits. Countdown resend timer.
+ */
+
+import React, { useState, useRef, useEffect, useCallback } from 'react'
+import {
+  KeyboardAvoidingView, Platform, StyleSheet,
+  Text, View, Animated, Pressable, ScrollView,
+} from 'react-native'
+import {
+  background, surface, border, borderAccent,
+  primary, primaryLight, primaryGlow,
+  success, successLight,
+  textPrimary, textSecondary, textMuted,
+  danger, dangerLight,
+  radius, spacing, layout,
+} from '../../theme/colors'
+import { fontSizes, fontWeights, letterSpacing } from '../../theme/typography'
+import { entrance, durations, easings, pulse } from '../../theme/motion'
+import { publicPost } from '../../utils/api'
+import { saveSession } from '../../utils/secureSession'
+import { auditEvent } from '../../utils/audit'
+import OTPBoxes from '../../components/inputs/OTPBoxes'
+import AnimatedButton from '../../components/primitives/AnimatedButton'
+import useOtpCountdown from '../../hooks/useOtpCountdown'
+
+const OTP_LENGTH = 6
 
 export default function OTPScreen({ navigation, route, onVerified }) {
-  const { width } = useWindowDimensions()
-  const layout = useResponsiveLayout({ tabBarHeight: 0 })
-  const contentInnerWidth = Math.min(layout.maxContentWidth, width - 2 * layout.horizontalPadding)
-  const { mobile, countryCode } = route?.params || {}
-  const [digits, setDigits] = useState(['', '', '', '', '', ''])
-  const [otpError, setOtpError] = useState('')
-  const inputRefs = useRef([])
-  const { formatted, secondsLeft, restart } = useOtpCountdown(30)
+  const { mobile, phone, cooldownSeconds = 60 } = route.params || {}
 
-  const digitSize = width < 340 ? 44 : width < 400 ? 48 : 52
-  const digitFont = width < 340 ? 16 : 18
-  const digitGap = width < 340 ? 6 : 10
+  const [otp,       setOtp]       = useState('')
+  const [loading,   setLoading]   = useState(false)
+  const [verified,  setVerified]  = useState(false)
+  const [error,     setError]     = useState('')
+  const [resending, setResending] = useState(false)
 
-  const title = useMemo(() => 'OTP Verification', [])
-  const subtitle = useMemo(
-    () => `Enter the 6-digit code sent to ${countryCode || '+91'} ${mobile || ''}.`,
-    [countryCode, mobile]
-  )
+  const { secondsLeft: countdown, restart: resetCountdown } = useOtpCountdown(cooldownSeconds)
+  const canResend = countdown === 0
 
-  const setDigitAt = (idx, text) => {
-    const clean = String(text || '').replace(/\D/g, '').slice(-1)
-    const next = [...digits]
-    next[idx] = clean
-    setDigits(next)
+  // Entrance
+  const fade  = useRef(new Animated.Value(0)).current
+  const slide = useRef(new Animated.Value(24)).current
+  // Success checkmark scale
+  const checkScale = useRef(new Animated.Value(0)).current
 
-    if (clean && idx < 5) {
-      const nextRef = inputRefs.current[idx + 1]
-      nextRef?.focus?.()
+  useEffect(() => {
+    entrance(fade, slide).start()
+  }, [])
+
+  // Auto-submit when 6 digits are entered
+  useEffect(() => {
+    if (otp.length === OTP_LENGTH && !loading && !verified) {
+      verifyOtp(otp)
     }
-  }
+  }, [otp])
 
-  const canVerify = digits.every((d) => String(d || '').length === 1)
+  const verifyOtp = useCallback(async (otpValue) => {
+    if (!otpValue || otpValue.length < OTP_LENGTH) return
+    setLoading(true)
+    setError('')
+    try {
+      const result = await publicPost('/auth/otp/verify', { phone, code: otpValue })
 
-  const onVerify = () => {
-    const otp = digits.join('')
-    if (!canVerify) {
-      auditEvent('LOGIN_FAILED', { reason: 'OTP_INCOMPLETE', mobile })
-      setOtpError('Please enter complete 6-digit OTP.')
-      return
+      // Backend returns: { token, refresh_token, roles, user: { user_id, phone, email, email_verified, name, full_name }, linked_children }
+      const userInfo = result.user || {}
+      const newSession = {
+        token:          result.token || result.sessionToken,
+        refresh_token:  result.refresh_token,
+        phone:          userInfo.phone || phone,
+        email:          userInfo.email || null,
+        email_verified: !!userInfo.email_verified,
+        name:           userInfo.name || userInfo.full_name || null,
+        full_name:      userInfo.full_name || userInfo.name || null,
+        roles:          result.roles || [],
+        linked_children: result.linked_children || 0,
+        // children fetched fresh by dashboard — don't cache stale data here
+        children:       [],
+      }
+      await saveSession(newSession)
+      auditEvent('OTP_VERIFIED', { phone })
+      setVerified(true)
+      // Animate success checkmark
+      Animated.spring(checkScale, {
+        toValue: 1,
+        tension: 60,
+        friction: 7,
+        useNativeDriver: true,
+      }).start()
+      // Navigate after brief success display
+      setTimeout(() => {
+        onVerified?.(newSession)
+      }, 1200)
+    } catch (err) {
+      const msg = err.message || 'Invalid OTP. Please try again.'
+      setError(msg)
+      setOtp('')
+      auditEvent('OTP_FAILED', { phone, error: msg })
+    } finally {
+      setLoading(false)
     }
-    if (otp !== '123456') {
-      auditEvent('LOGIN_FAILED', { reason: 'OTP_INVALID', mobile })
-      setOtpError('Invalid OTP. Please use 123456 for now.')
-      return
+  }, [phone, checkScale, onVerified])
+
+  const handleResend = useCallback(async () => {
+    if (!canResend || resending) return
+    setResending(true)
+    setError('')
+    setOtp('')
+    try {
+      await publicPost('/auth/otp/request', { phone })
+      resetCountdown()
+      auditEvent('OTP_RESENT', { phone })
+    } catch (err) {
+      setError('Failed to resend OTP.')
+    } finally {
+      setResending(false)
     }
-    setOtpError('')
-    const session = resolveParentSession({ countryCode, mobile })
-    auditEvent('LOGIN_SUCCESS', { mobile, mode: session.mode })
-    onVerified?.(session, otp)
-  }
+  }, [canResend, resending, phone, resetCountdown])
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <StackSafeScrollView keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.subtitle}>{subtitle}</Text>
-        </View>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+    >
+      {/* ── Background Glow ── */}
+      <View style={styles.bgGlow} />
 
-        <View style={styles.card}>
-          <Text style={styles.label}>One-time password</Text>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View
+          style={[
+            styles.inner,
+            { opacity: fade, transform: [{ translateY: slide }] },
+          ]}
+        >
+          {/* ── Back Button ── */}
+          <Pressable
+            onPress={() => navigation.goBack()}
+            style={styles.backBtn}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Text style={styles.backText}>← Back</Text>
+          </Pressable>
 
-          <View style={[styles.digitsRow, { gap: digitGap }]}>
-            {digits.map((d, idx) => (
-              <TextInput
-                key={idx}
-                value={d}
-                autoFocus={idx === 0}
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                autoComplete="sms-otp"
-                maxLength={1}
-                ref={(el) => {
-                  inputRefs.current[idx] = el
-                }}
-                onChangeText={(t) => setDigitAt(idx, t)}
-                style={[
-                  styles.digit,
-                  {
-                    height: digitSize,
-                    minWidth: Math.max(36, (contentInnerWidth - 36 - digitGap * 5) / 6),
-                    fontSize: digitFont,
-                    borderRadius: digitSize * 0.3,
-                  },
-                ]}
-              />
-            ))}
-          </View>
-
-          <View style={styles.resendRow}>
-            <Text style={styles.helper}>Didn’t receive code? Resend in {formatted}</Text>
-            <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.changeNumberBtn, pressed && styles.changeNumberBtnPressed]}>
-              <Text style={styles.changeNumberText}>Change number</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.resendWrap}>
-            <Button
-              variant="outline"
-              onPress={() => {
-                if (secondsLeft > 0) return
-                auditEvent('LOGIN_OTP_SENT', { resend: true, mobile })
-                restart()
-                setDigits(['', '', '', '', '', ''])
-                setOtpError('')
-              }}
-              disabled={secondsLeft > 0}
-            >
-              Resend OTP
-            </Button>
-          </View>
-
-          <View style={styles.demoHintWrap}>
-            <Text style={styles.demoHintText}>Dummy OTP (current): 123456</Text>
-          </View>
-
-          {otpError ? (
-            <View style={styles.errorWrap}>
-              <Text style={styles.errorText}>{otpError}</Text>
+          {/* ── Header ── */}
+          <View style={styles.header}>
+            <View style={styles.iconWrap}>
+              <View style={styles.iconGlow} />
+              <Text style={styles.icon}>💬</Text>
             </View>
-          ) : null}
-
-          <View style={styles.verifyWrap}>
-            <Button variant="primary" onPress={onVerify} disabled={!canVerify} accessibilityLabel="Verify OTP">
-              Verify
-            </Button>
+            <Text style={styles.title}>Check WhatsApp</Text>
+            <Text style={styles.subtitle}>
+              We sent a 6-digit code to{'\n'}
+              <Text style={styles.phone}>+91 {mobile}</Text>
+            </Text>
           </View>
-        </View>
-      </StackSafeScrollView>
+
+          {/* ── OTP Boxes ── */}
+          <View style={styles.otpSection}>
+            {!verified ? (
+              <>
+                <OTPBoxes
+                  value={otp}
+                  onChange={(v) => { setOtp(v); setError('') }}
+                  length={OTP_LENGTH}
+                  error={!!error}
+                  disabled={loading}
+                  autoFocus
+                />
+
+                {error ? (
+                  <View style={styles.errorBox}>
+                    <Text style={styles.errorText}>⚠️  {error}</Text>
+                  </View>
+                ) : null}
+
+                {/* Manual submit */}
+                <AnimatedButton
+                  variant="primary"
+                  size="lg"
+                  onPress={() => verifyOtp(otp)}
+                  loading={loading}
+                  disabled={otp.length < OTP_LENGTH}
+                  style={styles.submitBtn}
+                >
+                  Verify OTP
+                </AnimatedButton>
+
+                {/* Resend */}
+                <View style={styles.resendRow}>
+                  {canResend ? (
+                    <Pressable onPress={handleResend} disabled={resending}>
+                      <Text style={styles.resendActive}>
+                        {resending ? 'Sending…' : 'Resend OTP'}
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.resendTimer}>
+                      Resend in{' '}
+                      <Text style={{ color: primary }}>
+                        {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
+                      </Text>
+                    </Text>
+                  )}
+                </View>
+              </>
+            ) : (
+              /* ── Success State ── */
+              <Animated.View
+                style={[styles.successWrap, { transform: [{ scale: checkScale }] }]}
+              >
+                <View style={styles.successBadge}>
+                  <Text style={styles.successCheck}>✓</Text>
+                </View>
+                <Text style={styles.successTitle}>Verified!</Text>
+                <Text style={styles.successSub}>Loading your dashboard…</Text>
+              </Animated.View>
+            )}
+          </View>
+
+          {/* ── Info ── */}
+          {!verified ? (
+            <Text style={styles.info}>
+              Didn\'t get the message? Make sure +91 {mobile} is on WhatsApp.
+            </Text>
+          ) : null}
+        </Animated.View>
+      </ScrollView>
     </KeyboardAvoidingView>
   )
 }
 
 const styles = StyleSheet.create({
   screen: {
-    flex: 1,
+    flex:            1,
     backgroundColor: background,
   },
-  header: {
-    borderWidth: 1,
-    borderColor: border,
-    backgroundColor: 'rgba(23,40,69,0.92)',
-    borderRadius: radius.lg,
-    padding: 14,
+  scroll: {
+    flexGrow:        1,
+    justifyContent:  'center',
   },
+  bgGlow: {
+    position:        'absolute',
+    width:           280,
+    height:          280,
+    borderRadius:    140,
+    backgroundColor: 'rgba(0,240,255,0.05)',
+    top:             -60,
+    left:            -60,
+  },
+  inner: {
+    paddingHorizontal: layout.screenPaddingH,
+    paddingVertical:   spacing.xl,
+    gap:               spacing.xl,
+  },
+  backBtn: {
+    position: 'absolute',
+    top:      spacing.xl,
+    left:     layout.screenPaddingH,
+  },
+  backText: {
+    color:      textSecondary,
+    fontSize:   fontSizes.body,
+    fontWeight: fontWeights.bold,
+  },
+  // ── Header ──
+  header: {
+    alignItems: 'center',
+    gap:        spacing.md,
+    marginTop:  spacing.xxxl,
+  },
+  iconWrap: {
+    width:           80,
+    height:          80,
+    borderRadius:    40,
+    backgroundColor: 'rgba(0,240,255,0.08)',
+    borderWidth:     1.5,
+    borderColor:     'rgba(0,240,255,0.25)',
+    alignItems:      'center',
+    justifyContent:  'center',
+    position:        'relative',
+    overflow:        'hidden',
+  },
+  iconGlow: {
+    position:        'absolute',
+    inset:           0,
+    backgroundColor: 'rgba(0,240,255,0.10)',
+    borderRadius:    40,
+  },
+  icon: { fontSize: 36 },
   title: {
-    color: textPrimary,
-    fontWeight: '900',
-    fontSize: 20,
+    color:      textPrimary,
+    fontSize:   fontSizes.h2,
+    fontWeight: fontWeights.black,
   },
   subtitle: {
-    marginTop: 4,
-    color: textMuted,
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  card: {
-    marginTop: 6,
-    backgroundColor: card,
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: border,
-    padding: 16,
-  },
-  label: {
-    color: textSecondary,
-    fontWeight: '800',
-    fontSize: 12,
-  },
-  digitsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    flexWrap: 'nowrap',
-    marginTop: 14,
-  },
-  digit: {
-    flex: 1,
-    backgroundColor: 'rgba(11,23,48,0.6)',
-    borderWidth: 1,
-    borderColor: border,
-    color: textPrimary,
+    color:     textSecondary,
+    fontSize:  fontSizes.body,
     textAlign: 'center',
-    fontWeight: '900',
-    paddingHorizontal: 0,
+    lineHeight: 24,
   },
-  helper: {
-    marginTop: 14,
-    color: textSecondary,
-    fontWeight: '700',
-    fontSize: 12,
+  phone: {
+    color:      primary,
+    fontWeight: fontWeights.bold,
   },
-  resendRow: {
-    marginTop: 4,
-    gap: 8,
+  // ── OTP Section ──
+  otpSection: {
+    alignItems: 'center',
+    gap:        spacing.xl,
   },
-  changeNumberBtn: {
-    borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.45)',
-    borderRadius: 10,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  changeNumberBtnPressed: {
-    opacity: 0.8,
-  },
-  changeNumberText: {
-    color: primary,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  resendWrap: {
-    marginTop: 10,
-  },
-  demoHintWrap: {
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(250,204,21,0.45)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(250,204,21,0.14)',
-  },
-  demoHintText: {
-    color: textPrimary,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  errorWrap: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.55)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(239,68,68,0.16)',
+  errorBox: {
+    backgroundColor: dangerLight,
+    borderRadius:    radius.md,
+    borderWidth:     1,
+    borderColor:     'rgba(255,82,82,0.35)',
+    paddingHorizontal: spacing.md,
+    paddingVertical:   spacing.sm,
+    width:           '100%',
   },
   errorText: {
-    color: '#FECACA',
-    fontSize: 12,
-    fontWeight: '800',
+    color:      '#FFADAD',
+    fontSize:   fontSizes.sub,
+    fontWeight: fontWeights.bold,
+    textAlign:  'center',
   },
-  verifyWrap: {
-    marginTop: 18,
+  submitBtn: {
+    width: '100%',
+  },
+  resendRow: {
+    alignItems: 'center',
+  },
+  resendActive: {
+    color:      primary,
+    fontSize:   fontSizes.body,
+    fontWeight: fontWeights.bold,
+  },
+  resendTimer: {
+    color:    textMuted,
+    fontSize: fontSizes.sub,
+  },
+  // ── Success ──
+  successWrap: {
+    alignItems: 'center',
+    gap:        spacing.md,
+  },
+  successBadge: {
+    width:           100,
+    height:          100,
+    borderRadius:    50,
+    backgroundColor: successLight,
+    borderWidth:     2,
+    borderColor:     success + '60',
+    alignItems:      'center',
+    justifyContent:  'center',
+  },
+  successCheck: {
+    color:      success,
+    fontSize:   48,
+    fontWeight: fontWeights.black,
+  },
+  successTitle: {
+    color:      textPrimary,
+    fontSize:   fontSizes.h2,
+    fontWeight: fontWeights.black,
+  },
+  successSub: {
+    color:    textMuted,
+    fontSize: fontSizes.body,
+  },
+  info: {
+    color:     textMuted,
+    fontSize:  fontSizes.caption,
+    textAlign: 'center',
+    lineHeight: 18,
   },
 })
