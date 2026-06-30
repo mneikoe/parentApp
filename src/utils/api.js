@@ -79,3 +79,12 @@ export const publicPost = async (path, body) => {
 export const parentPatch = async (path, body) => {
   return apiFetch('PATCH', `${MOBILE_PARENT_API}${path}`, body, true);
 };
+
+// ─── PTM API Methods ──────────────────────────────────────────
+export const ptmGet = async (path) => {
+  return apiFetch('GET', `${API_BASE}/api/ptm${path}`, null, true);
+};
+
+export const ptmPost = async (path, body) => {
+  return apiFetch('POST', `${API_BASE}/api/ptm${path}`, body, true);
+};

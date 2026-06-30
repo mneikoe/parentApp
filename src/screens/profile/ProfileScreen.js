@@ -55,7 +55,7 @@ const infoStyles = StyleSheet.create({
   },
 })
 
-export default function ProfileScreen() {
+export default function ProfileScreen({ navigation }) {
   const { session, parentName, parentPhone, children: sessionChildren, logout } = useSession()
 
   const fadeAnim  = useRef(new Animated.Value(0)).current
@@ -161,8 +161,25 @@ export default function ProfileScreen() {
           </View>
         ) : null}
 
+        {/* ── Raise Complaint / Support Section ── */}
+        <PremiumCard style={styles.section} padding={false}>
+          <View style={styles.cardPad}>
+            <Text style={styles.cardTitle}>Help & Support</Text>
+            <Text style={[styles.signOutNote, { textAlign: 'left', marginTop: 0, marginBottom: spacing.md }]}>
+              Have any issues or feedback? View your complaints or raise a new ticket to the school administration.
+            </Text>
+            <AnimatedButton
+              variant="primary"
+              size="md"
+              onPress={() => navigation.navigate('ComplaintsList')}
+            >
+              Complaints & Support Tickets
+            </AnimatedButton>
+          </View>
+        </PremiumCard>
+
         {/* ── App Info ── */}
-        <PremiumCard style={styles.section} variant="glass" padding={false}>
+        <PremiumCard style={styles.section} padding={false}>
           <View style={styles.cardPad}>
             <Text style={styles.cardTitle}>About STRAX</Text>
             <InfoRow label="App Version"       value="2.0.0" />

@@ -34,24 +34,33 @@ import AttendanceScreen       from '../screens/attendance/AttendanceScreen'
 import FeesScreen             from '../screens/fees/FeesScreen'
 import TransportModuleScreen  from '../screens/transport/TransportModuleScreen'
 import ProfileScreen          from '../screens/profile/ProfileScreen'
+import RaiseComplaintScreen   from '../screens/profile/RaiseComplaintScreen'
+import ComplaintsListScreen  from '../screens/profile/ComplaintsListScreen'
+import NotificationCenterScreen from '../screens/notifications/NotificationCenterScreen'
 
 // ── Custom Nav UI ─────────────────────────────────────────────
 import BottomTabBar from '../components/navigation/BottomTabBar'
 
 enableScreens()
 
-const AuthStack = createNativeStackNavigator()
-const Tab       = createBottomTabNavigator()
-const HomeStack = createNativeStackNavigator()
+const AuthStack          = createNativeStackNavigator()
+const Tab                = createBottomTabNavigator()
+const HomeStack          = createNativeStackNavigator()
+const NotificationsStack = createNativeStackNavigator()
 
 // ── Home Stack ────────────────────────────────────────────────
 import LinkChildScreen from '../screens/profile/LinkChildScreen'
+import ParentPTMListScreen from '../screens/ptm/ParentPTMListScreen'
+import ParentPTMRoomScreen from '../screens/ptm/ParentPTMRoomScreen'
 
 function HomeNavigator() {
   return (
     <HomeStack.Navigator screenOptions={{ headerShown: false }}>
       <HomeStack.Screen name="Dashboard" component={DashboardScreen} />
       <HomeStack.Screen name="LinkChild" component={LinkChildScreen} />
+      <HomeStack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
+      <HomeStack.Screen name="ParentPTMList" component={ParentPTMListScreen} />
+      <HomeStack.Screen name="ParentPTMRoom" component={ParentPTMRoomScreen} />
     </HomeStack.Navigator>
   )
 }
@@ -95,22 +104,50 @@ function ProfileNavigator() {
   return (
     <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
       <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} />
+      <ProfileStack.Screen name="ComplaintsList" component={ComplaintsListScreen} />
+      <ProfileStack.Screen name="RaiseComplaint" component={RaiseComplaintScreen} />
     </ProfileStack.Navigator>
   )
 }
 
+
+
 // ── Main Tabs ─────────────────────────────────────────────────
 function MainTabs() {
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  // Poll unread count every 60 s
+  useEffect(() => {
+    let mounted = true
+    const fetchCount = async () => {
+      try {
+        const { getAccessToken } = require('../utils/secureSession')
+        const { MOBILE_PARENT_API } = require('../utils/api')
+        const token = await getAccessToken()
+        const res = await fetch(`${MOBILE_PARENT_API}/notifications/unread-count`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        const data = await res.json().catch(() => ({}))
+        if (mounted) setUnreadCount(data.unreadCount || 0)
+      } catch {
+        // silent — badge is best-effort
+      }
+    }
+    fetchCount()
+    const interval = setInterval(fetchCount, 60000)
+    return () => { mounted = false; clearInterval(interval) }
+  }, [])
+
   return (
     <Tab.Navigator
       screenOptions={{ headerShown: false }}
       tabBar={(props) => <BottomTabBar {...props} />}
     >
-      <Tab.Screen name="Home"       component={HomeNavigator} />
-      <Tab.Screen name="Academics"  component={AcademicsNavigator} />
-      <Tab.Screen name="Transport"  component={TransportNavigator} />
-      <Tab.Screen name="Payments"   component={PaymentsNavigator} />
-      <Tab.Screen name="Profile"    component={ProfileNavigator} />
+      <Tab.Screen name="Home"          component={HomeNavigator} />
+      <Tab.Screen name="Academics"     component={AcademicsNavigator} />
+      <Tab.Screen name="Transport"     component={TransportNavigator} />
+      <Tab.Screen name="Payments"      component={PaymentsNavigator} />
+      <Tab.Screen name="Profile"       component={ProfileNavigator} />
     </Tab.Navigator>
   )
 }

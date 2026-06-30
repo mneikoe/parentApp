@@ -1,6 +1,7 @@
 /**
- * DashboardScreen v4 — Premium STRAX Parent Dashboard with TOP-BAR Switcher
- * Real-time activeChild synced across all tabs.
+ * DashboardScreen.js
+ * ─────────────────────────────────────────────────────────────
+ * Premium STRAX Parent Dashboard with GlobalHeader integration.
  */
 
 import React, { useEffect, useCallback, useRef, useState } from 'react'
@@ -21,25 +22,14 @@ import { useSession } from '../../context/SessionContext'
 import { parentGet, API_BASE } from '../../utils/api'
 import { shadows } from '../../theme/shadows'
 
+import GlobalHeader     from '../../components/navigation/GlobalHeader'
 import StatCard         from '../../components/cards/StatCard'
 import FeeCard          from '../../components/cards/FeeCard'
-import AttendanceRing   from '../../components/cards/AttendanceRing'
 import SkeletonCard     from '../../components/feedback/SkeletonCard'
-import EmptyState       from '../../components/feedback/EmptyState'
 import SectionHeader    from '../../components/primitives/SectionHeader'
 import AnimatedButton   from '../../components/primitives/AnimatedButton'
 
 import { TabSafeScrollView } from '../../components/common/SafeScrollView'
-
-const getGreeting = () => {
-  const h = new Date().getHours()
-  if (h < 12) return 'Good Morning'
-  if (h < 17) return 'Good Afternoon'
-  return 'Good Evening'
-}
-
-const todayLabel = () =>
-  new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
 
 export default function DashboardScreen({ navigation }) {
   const {
@@ -68,7 +58,6 @@ export default function DashboardScreen({ navigation }) {
       setAllChildren(kids)
       await setChildren(kids)
       if (kids.length > 0) {
-        // Auto-select first child if none active
         if (!activeChild || !kids.find(k => k.student_id === activeChild.student_id)) {
           setActiveChild(kids[0])
         }
@@ -137,26 +126,24 @@ export default function DashboardScreen({ navigation }) {
 
   const navigateTab = useCallback((tab) => navigation.navigate(tab), [navigation])
 
-  const handleSelectChild = useCallback((child) => {
-    setActiveChild(child)
-    fetchDashboard(false, child)
-  }, [setActiveChild, fetchDashboard])
-
   // ── Skeleton ────────────────────────────────────────────────
   if (loading && !dashData) {
     return (
-      <TabSafeScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.skeletonHeader}>
-          <SkeletonCard height={20} style={{ width: '40%' }} />
-          <SkeletonCard height={14} style={{ width: '60%', marginTop: 8 }} />
-        </View>
-        <SkeletonCard height={80} style={styles.sectionGap} />
-        <View style={[styles.statsRow, styles.sectionGap]}>
-          <SkeletonCard height={90} style={{ flex: 1 }} />
-          <SkeletonCard height={90} style={{ flex: 1 }} />
-          <SkeletonCard height={90} style={{ flex: 1 }} />
-        </View>
-      </TabSafeScrollView>
+      <View style={{ flex: 1, backgroundColor: background }}>
+        <GlobalHeader />
+        <TabSafeScrollView showsVerticalScrollIndicator={false}>
+          <View style={styles.skeletonHeader}>
+            <SkeletonCard height={20} style={{ width: '40%' }} />
+            <SkeletonCard height={14} style={{ width: '60%', marginTop: 8 }} />
+          </View>
+          <SkeletonCard height={80} style={styles.sectionGap} />
+          <View style={[styles.statsRow, styles.sectionGap]}>
+            <SkeletonCard height={90} style={{ flex: 1 }} />
+            <SkeletonCard height={90} style={{ flex: 1 }} />
+            <SkeletonCard height={90} style={{ flex: 1 }} />
+          </View>
+        </TabSafeScrollView>
+      </View>
     )
   }
 
@@ -164,335 +151,217 @@ export default function DashboardScreen({ navigation }) {
   const currentChild = activeChild || allChildren[0] || null
 
   return (
-    <TabSafeScrollView
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            loadChildren()
-            fetchDashboard(true)
-          }}
-          tintColor={primary}
-          colors={[primary]}
-        />
-      }
-    >
-      <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+    <View style={{ flex: 1, backgroundColor: background }}>
+      <GlobalHeader />
 
-        {/* ── TOP BAR SWITCHER (Fixed header switcher layout) ── */}
-        <View style={styles.topBarHeader}>
-          <View style={styles.topBarLeft}>
-            <Text style={styles.greeting}>{getGreeting()}</Text>
-            <Text style={styles.parentName}>{parentName || 'Parent'} 👋</Text>
-            <Text style={styles.dateLabel}>{todayLabel()}</Text>
-          </View>
-          
-          {/* Linked Children Quick selector in Top Bar */}
-          {hasChildren ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.topBarSwitcherScroll}
-            >
-              {allChildren.map((child, idx) => {
-                const isActive = child.student_id === currentChild?.student_id
-                const avatarUri = child.photo_url ? `${API_BASE}${child.photo_url}` : null
-                return (
-                  <Pressable
-                    key={child.student_id || idx}
-                    style={[styles.topBarChip, isActive && styles.topBarChipActive]}
-                    onPress={() => handleSelectChild(child)}
-                  >
-                    <View style={[styles.topBarAvatar, isActive && styles.topBarAvatarActive]}>
-                      {avatarUri ? (
-                        <Image source={{ uri: avatarUri }} style={{ width: 28, height: 28, borderRadius: 14 }} />
-                      ) : (
-                        <Text style={[styles.topBarAvatarText, isActive && { color: '#fff' }]}>
-                          {(child.full_name || child.first_name || 'S')[0].toUpperCase()}
-                        </Text>
-                      )}
-                    </View>
-                    <Text style={[styles.topBarChipText, isActive && { color: primary, fontWeight: 'bold' }]}>
-                      {child.first_name || child.full_name?.split(' ')[0] || 'Student'}
-                    </Text>
-                  </Pressable>
-                )
-              })}
-            </ScrollView>
-          ) : (
-            <Pressable
-              style={styles.avatarBtn}
-              onPress={() => navigateTab('Profile')}
-            >
-              <View style={styles.headerAvatar}>
-                <Text style={styles.headerAvatarText}>
-                  {(parentName || 'P')[0].toUpperCase()}
-                </Text>
-              </View>
-            </Pressable>
-          )}
-        </View>
+      <TabSafeScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              loadChildren()
+              fetchDashboard(true)
+            }}
+            tintColor={primary}
+            colors={[primary]}
+          />
+        }
+      >
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
 
-        {/* ── No Children Linked Banner ── */}
-        {!hasChildren ? (
-          <View style={styles.sectionGap}>
-            <Pressable
-              style={[styles.linkBanner, shadows.glow]}
-              onPress={() => navigation.navigate('LinkChild')}
-            >
-              <Text style={styles.bannerEmoji}>🔍</Text>
-              <View style={styles.bannerText}>
-                <Text style={styles.bannerTitle}>No Students Linked</Text>
-                <Text style={styles.bannerSub}>Tap to submit a linking request to the school</Text>
-              </View>
-              <Text style={styles.bannerArrow}>➔</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {/* ── Student Active Card ── */}
-        {dashData && currentChild ? (
-          <View style={styles.sectionGap}>
-            <View style={styles.childInfoCard}>
-              <View style={styles.childInfoRow}>
-                <View style={[styles.childInfoAvatar, { overflow: 'hidden' }]}>
-                  {dashData.photoUrl ? (
-                    <Image source={{ uri: `${API_BASE}${dashData.photoUrl}` }} style={styles.childInfoAvatarImage} />
-                  ) : (
-                    <Text style={styles.childInfoAvatarText}>
-                      {(dashData.childName || 'S')[0].toUpperCase()}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.childInfoName}>{dashData.childName}</Text>
-                  <Text style={styles.childInfoSub}>
-                    {dashData.className}{dashData.sectionName ? ` · ${dashData.sectionName}` : ''} · {dashData.branchName}
-                  </Text>
-                  {dashData.admissionNo ? (
-                    <Text style={styles.childInfoAdm}>Adm: {dashData.admissionNo}</Text>
-                  ) : null}
-                </View>
-              </View>
-            </View>
-          </View>
-        ) : null}
-
-        {/* ── Stats Row ── */}
-        {hasChildren ? (
-          <View style={styles.sectionGap}>
-            <SectionHeader title="Today's Overview" />
-            <View style={styles.statsRow}>
-              <StatCard
-                icon="🎓"
-                label="Attendance"
-                value={dashData ? (dashData.todayAttendance === 'PRESENT' ? 'Present' : dashData.todayAttendance === 'ABSENT' ? 'Absent' : 'N/A') : '—'}
-                accentColor={
-                  dashData?.todayAttendance === 'PRESENT' ? success :
-                  dashData?.todayAttendance === 'ABSENT'  ? danger  : warning
-                }
-                style={{ flex: 1 }}
-              />
-              <StatCard
-                icon="📚"
-                label="Homework"
-                value={dashData ? `${dashData.homeworkCount} pending` : '—'}
-                accentColor={primary}
-                style={{ flex: 1 }}
-              />
-              <StatCard
-                icon="💳"
-                label="Fees Due"
-                value={
-                  !dashData ? '—' :
-                  dashData.feeDue > 0
-                    ? `₹${Number(dashData.feeDue).toLocaleString('en-IN')}`
-                    : 'Clear'
-                }
-                accentColor={
-                  dashData?.feeOverdue  ? danger  :
-                  dashData?.feeDue > 0  ? warning : success
-                }
-                style={{ flex: 1 }}
-              />
-            </View>
-          </View>
-        ) : null}
-
-        {/* ── Today's Schedule Snapshot (Timetable list on dashboard) ── */}
-        {hasChildren ? (
-          <View style={styles.sectionGap}>
-            <SectionHeader title="Today's Classes" subtitle="Timetable schedule" />
-            {dashData?.classesToday?.length > 0 ? (
-              dashData.classesToday.slice(0, 3).map((period, i) => (
-                <View key={i} style={styles.classCardItem}>
-                  <View>
-                    <Text style={styles.classSubject}>{period.subject_name}</Text>
-                    <Text style={styles.classTeacher}>Teacher: {period.teacher_name || 'Not assigned'}</Text>
-                  </View>
-                  <View style={styles.classTimeTag}>
-                    <Text style={styles.classTimeText}>{period.start_time.slice(0, 5)} - {period.end_time.slice(0, 5)}</Text>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <View style={styles.emptyTimetable}>
-                <Text style={styles.emptyText}>No classes scheduled or recorded for today.</Text>
-              </View>
-            )}
-          </View>
-        ) : null}
-
-        {/* ── Active Homework Snapshot ── */}
-        {hasChildren ? (
-          <View style={styles.sectionGap}>
-            <SectionHeader title="Homework Tasks" subtitle="Pending assignments" />
-            {dashData?.homeworkPending?.length > 0 ? (
-              dashData.homeworkPending.slice(0, 2).map((hw, i) => (
-                <Pressable
-                  key={hw.id || i}
-                  style={[styles.classCardItem, { borderLeftColor: warning }]}
-                  onPress={() => navigateTab('Academics')}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.classSubject}>{hw.title}</Text>
-                    <Text style={styles.classTeacher}>{hw.subject_name} · Due: {new Date(hw.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</Text>
-                  </View>
-                  <Text style={{ fontSize: fontSizes.body, color: warning }}>➔</Text>
-                </Pressable>
-              ))
-            ) : (
-              <View style={styles.emptyTimetable}>
-                <Text style={styles.emptyText}>All clean! No pending homework tasks.</Text>
-              </View>
-            )}
-          </View>
-        ) : null}
-
-        {/* ── Fee Due Card ── */}
-        {dashData?.feeDue > 0 ? (
-          <View style={styles.sectionGap}>
-            <FeeCard
-              fee={{
-                feeName:    dashData.feeOverdue ? 'Overdue Fee' : 'Fee Due',
-                amount:     dashData.feeDue,
-                paidAmount: 0,
-                status:     dashData.feeOverdue ? 'OVERDUE' : 'PENDING',
-                dueDate:    dashData.feeDueDate,
-              }}
-              onPress={() => navigateTab('Payments')}
-            />
-          </View>
-        ) : null}
-
-        {/* ── Quick Actions ── */}
-        <View style={styles.sectionGap}>
-          <SectionHeader title="Quick Access" />
-          <View style={styles.actionsGrid}>
-            {[
-              { key: 'Academics', emoji: '📊', label: 'Attendance', tab: 'Academics' },
-              { key: 'Payments',  emoji: '💳', label: 'Fees',       tab: 'Payments'  },
-              { key: 'Transport', emoji: '🚌', label: 'Bus',        tab: 'Transport' },
-              { key: 'Profile',   emoji: '👤', label: 'Profile',    tab: 'Profile'   },
-            ].map((action) => (
+          {/* ── No Children Linked Banner ── */}
+          {!hasChildren ? (
+            <View style={styles.sectionGap}>
               <Pressable
-                key={action.key}
-                style={styles.actionBtn}
-                onPress={() => navigateTab(action.tab)}
+                style={[styles.linkBanner, shadows.glow]}
+                onPress={() => navigation.navigate('LinkChild')}
               >
-                <View style={styles.actionIcon}>
-                  <Text style={styles.actionEmoji}>{action.emoji}</Text>
+                <Text style={styles.bannerEmoji}>🔍</Text>
+                <View style={styles.bannerText}>
+                  <Text style={styles.bannerTitle}>No Students Linked</Text>
+                  <Text style={styles.bannerSub}>Tap to submit a linking request to the school</Text>
                 </View>
-                <Text style={styles.actionLabel}>{action.label}</Text>
+                <Text style={styles.bannerArrow}>➔</Text>
               </Pressable>
-            ))}
+            </View>
+          ) : null}
+
+          {/* ── Student Active Card ── */}
+          {dashData && currentChild ? (
+            <View style={styles.sectionGap}>
+              <View style={styles.childInfoCard}>
+                <View style={styles.childInfoRow}>
+                  <View style={[styles.childInfoAvatar, { overflow: 'hidden' }]}>
+                    {dashData.photoUrl ? (
+                      <Image source={{ uri: `${API_BASE}${dashData.photoUrl}` }} style={styles.childInfoAvatarImage} />
+                    ) : (
+                      <Text style={styles.childInfoAvatarText}>
+                        {(dashData.childName || 'S')[0].toUpperCase()}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.childInfoName}>{dashData.childName}</Text>
+                    <Text style={styles.childInfoSub}>
+                      {dashData.className}{dashData.sectionName ? ` · ${dashData.sectionName}` : ''} · {dashData.branchName}
+                    </Text>
+                    {dashData.admissionNo ? (
+                      <Text style={styles.childInfoAdm}>Adm: {dashData.admissionNo}</Text>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
+          {/* ── Stats Row ── */}
+          {hasChildren ? (
+            <View style={styles.sectionGap}>
+              <SectionHeader title="Today's Overview" />
+              <View style={styles.statsRow}>
+                <StatCard
+                  icon="🎓"
+                  label="Attendance"
+                  value={dashData ? (dashData.todayAttendance === 'PRESENT' ? 'Present' : dashData.todayAttendance === 'ABSENT' ? 'Absent' : 'N/A') : '—'}
+                  accentColor={
+                    dashData?.todayAttendance === 'PRESENT' ? success :
+                    dashData?.todayAttendance === 'ABSENT'  ? danger  : warning
+                  }
+                  style={{ flex: 1 }}
+                />
+                <StatCard
+                  icon="📚"
+                  label="Homework"
+                  value={dashData ? `${dashData.homeworkCount} pending` : '—'}
+                  accentColor={primary}
+                  style={{ flex: 1 }}
+                />
+                <StatCard
+                  icon="💳"
+                  label="Fees Due"
+                  value={
+                    !dashData ? '—' :
+                    dashData.feeDue > 0
+                      ? `₹${Number(dashData.feeDue).toLocaleString('en-IN')}`
+                      : 'Clear'
+                  }
+                  accentColor={
+                    dashData?.feeOverdue  ? danger  :
+                    dashData?.feeDue > 0  ? warning : success
+                  }
+                  style={{ flex: 1 }}
+                />
+              </View>
+            </View>
+          ) : null}
+
+          {/* ── Today's Schedule Snapshot (Timetable list on dashboard) ── */}
+          {hasChildren ? (
+            <View style={styles.sectionGap}>
+              <SectionHeader title="Today's Classes" subtitle="Timetable schedule" />
+              {dashData?.classesToday?.length > 0 ? (
+                dashData.classesToday.slice(0, 3).map((period, i) => (
+                  <View key={i} style={styles.classCardItem}>
+                    <View>
+                      <Text style={styles.classSubject}>{period.subject_name}</Text>
+                      <Text style={styles.classTeacher}>Teacher: {period.teacher_name || 'Not assigned'}</Text>
+                    </View>
+                    <View style={styles.classTimeTag}>
+                      <Text style={styles.classTimeText}>{period.start_time.slice(0, 5)} - {period.end_time.slice(0, 5)}</Text>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <View style={styles.emptyTimetable}>
+                  <Text style={styles.emptyText}>No classes scheduled or recorded for today.</Text>
+                </View>
+              )}
+            </View>
+          ) : null}
+
+          {/* ── Active Homework Snapshot ── */}
+          {hasChildren ? (
+            <View style={styles.sectionGap}>
+              <SectionHeader title="Homework Tasks" subtitle="Pending assignments" />
+              {dashData?.homeworkPending?.length > 0 ? (
+                dashData.homeworkPending.slice(0, 2).map((hw, i) => (
+                  <Pressable
+                    key={hw.id || i}
+                    style={[styles.classCardItem, { borderLeftColor: warning }]}
+                    onPress={() => navigateTab('Academics')}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.classSubject}>{hw.title}</Text>
+                      <Text style={styles.classTeacher}>{hw.subject_name} · Due: {new Date(hw.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</Text>
+                    </View>
+                    <Text style={{ fontSize: fontSizes.body, color: warning }}>➔</Text>
+                  </Pressable>
+                ))
+              ) : (
+                <View style={styles.emptyTimetable}>
+                  <Text style={styles.emptyText}>All clean! No pending homework tasks.</Text>
+                </View>
+              )}
+            </View>
+          ) : null}
+
+          {/* ── Fee Due Card ── */}
+          {dashData?.feeDue > 0 ? (
+            <View style={styles.sectionGap}>
+              <FeeCard
+                fee={{
+                  feeName:    dashData.feeOverdue ? 'Overdue Fee' : 'Fee Due',
+                  amount:     dashData.feeDue,
+                  paidAmount: 0,
+                  status:     dashData.feeOverdue ? 'OVERDUE' : 'PENDING',
+                  dueDate:    dashData.feeDueDate,
+                }}
+                onPress={() => navigateTab('Payments')}
+              />
+            </View>
+          ) : null}
+
+          {/* ── Quick Actions ── */}
+          <View style={styles.sectionGap}>
+            <SectionHeader title="Quick Access" />
+            <View style={styles.actionsGrid}>
+              {[
+                { key: 'Academics', emoji: '📊', label: 'Attendance', tab: 'Academics' },
+                { key: 'Payments',  emoji: '💳', label: 'Fees',       tab: 'Payments'  },
+                { key: 'Transport', emoji: '🚌', label: 'Bus',        tab: 'Transport' },
+                { key: 'PTM',       emoji: '📣', label: 'PTM',        tab: 'ParentPTMList' },
+                { key: 'Profile',   emoji: '👤', label: 'Profile',    tab: 'Profile'   },
+              ].map((action) => (
+                <Pressable
+                  key={action.key}
+                  style={styles.actionBtn}
+                  onPress={() => navigateTab(action.tab)}
+                >
+                  <View style={styles.actionIcon}>
+                    <Text style={styles.actionEmoji}>{action.emoji}</Text>
+                  </View>
+                  <Text style={styles.actionLabel}>{action.label}</Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
-        </View>
 
-        {/* ── Sign Out ── */}
-        <View style={[styles.sectionGap, { alignItems: 'center', paddingBottom: spacing.md }]}>
-          <AnimatedButton variant="ghost" size="sm" onPress={logout}>
-            Sign Out
-          </AnimatedButton>
-        </View>
+          {/* ── Sign Out ── */}
+          <View style={[styles.sectionGap, { alignItems: 'center', paddingBottom: spacing.md }]}>
+            <AnimatedButton variant="ghost" size="sm" onPress={logout}>
+              Sign Out
+            </AnimatedButton>
+          </View>
 
-        <View style={{ height: spacing.xxxl }} />
-      </Animated.View>
-    </TabSafeScrollView>
+          <View style={{ height: spacing.xxxl }} />
+        </Animated.View>
+      </TabSafeScrollView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
-  // Top bar switcher styles
-  topBarHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: layout.screenPaddingH,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: border,
-  },
-  topBarLeft: {
-    flex: 1,
-  },
-  topBarSwitcherScroll: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingLeft: spacing.xs,
-  },
-  topBarChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: surface,
-    borderWidth: 1,
-    borderColor: border,
-    borderRadius: radius.round,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    gap: 6,
-  },
-  topBarChipActive: {
-    borderColor: primary,
-    backgroundColor: primary + '10',
-  },
-  topBarAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: primary + '20',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  topBarAvatarActive: {
-    backgroundColor: primary,
-  },
-  topBarAvatarText: {
-    fontSize: fontSizes.caption,
-    fontWeight: fontWeights.bold,
-    color: textSecondary,
-  },
-  topBarChipText: {
-    fontSize: fontSizes.caption,
-    color: textSecondary,
-  },
-
-  greeting:      { color: textMuted,    fontSize: fontSizes.sub - 1,  fontWeight: fontWeights.medium },
-  parentName:    { color: textPrimary,  fontSize: fontSizes.body,   fontWeight: fontWeights.black },
-  dateLabel:     { color: textMuted,    fontSize: fontSizes.caption - 1 },
-  avatarBtn:     { marginLeft: spacing.md },
-  headerAvatar:  {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: primary + '25',
-    borderWidth: 1.5, borderColor: primary + '60',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  headerAvatarText: { color: primary, fontSize: fontSizes.caption, fontWeight: fontWeights.black },
-
   // Section spacing
   sectionGap: {
     paddingHorizontal: layout.screenPaddingH,
@@ -601,7 +470,7 @@ const styles = StyleSheet.create({
     gap:            spacing.sm,
   },
   actionBtn: {
-    width:           '22%',
+    width:           '18%',
     alignItems:      'center',
     gap:             spacing.xs,
   },
