@@ -88,3 +88,16 @@ export const ptmGet = async (path) => {
 export const ptmPost = async (path, body) => {
   return apiFetch('POST', `${API_BASE}/api/ptm${path}`, body, true);
 };
+
+/**
+ * Authenticated POST for Fees API (e.g. /api/fee/payment/offline/*)
+ */
+export const feePost = async (path, body) => {
+  return apiFetch('POST', `${API_BASE}/api/fee${path}`, body, true);
+};
+
+export const feeGet = async (path) => {
+  return apiFetch('GET', `${API_BASE}/api/fee${path}`, null, true);
+};
+
+
